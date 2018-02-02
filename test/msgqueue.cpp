@@ -1,7 +1,10 @@
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 
+#include <iostream>
 #include <functional>
+#include <atomic>
+#include <thread>
 #include "MessageQueue.hpp"
 
 using namespace libmsgpass;
@@ -133,6 +136,102 @@ TEST_CASE("Messages with a specific 'what' can be removed from the queue", "[msg
     }
 }
 
-TEST_CASE("Multiple thread can communicate using the message queue", "[msgqueue]") {
+static const int Total = 10000000;
 
+static const int Add = 1;
+static const int Subtract = 2;
+static const int Multiply = 3;
+static const int Divide = 4;
+
+static const int NThreads = 8;
+
+typedef struct {
+    std::atomic_int_fast32_t received;
+    std::atomic_int_fast32_t sent;
+    std::atomic_uint_fast64_t result;
+} Context;
+
+// Consumer thread
+static void ProcessOperation(MessageQueue& operQueue, Context& context) {
+    int count = 0;
+    while (context.received.fetch_add(1) < Total) {
+        operQueue.Receive([](int what, int arg1, int arg2, void* obj) {
+            Context* context = static_cast<Context*>(obj);
+            switch (what) {
+                case Add:
+                    context->result += arg1 + arg2;
+                    break;
+                case Subtract:
+                    context->result += arg1 - arg2;
+                    break;
+                case Multiply:
+                    context->result += arg1 * arg2;
+                    break;
+                case Divide:
+                default:
+                    context->result += arg1 / arg2;
+                    break;
+            }
+        });
+        count++;
+    }
+
+    std::cout << "Thread " << std::this_thread::get_id() << " processed " << count << " operations"
+              << "\n";
+}
+
+// Producer thread
+static void GenerateOperation(MessageQueue& operQueue, Context& context) {
+    int count = 0;
+    std::uint32_t current;
+    while ((current = context.sent.fetch_add(1)) < Total) {
+        switch (current % 4) {
+            case 0:
+                operQueue.Send(Add, 4, 5, &context);
+                break;
+            case 1:
+                operQueue.Send(Subtract, 9, 3, &context);
+                break;
+            case 2:
+                operQueue.Send(Multiply, 6, 2, &context);
+                break;
+            case 3:
+                operQueue.Send(Divide, 500, 100, &context);
+                break;
+        }
+        count++;
+    }
+    std::cout << "Thread " << std::this_thread::get_id() << " generated " << count << " operations"
+              << "\n";
+}
+
+TEST_CASE("Multiple thread can communicate using the message queue", "[msgqueue]") {
+    Context context;
+    MessageQueue operQueue;
+    std::vector<std::thread> threads;
+
+    static_assert((Total % 4) == 0, "Total must be a multiple of 4");
+
+    context.sent = 0;
+    context.received = 0;
+    context.result = 0;
+
+    // Spawn the producer threads
+    for (int i = 0; i < NThreads; ++i) {
+        threads.emplace_back(GenerateOperation, std::ref(operQueue), std::ref(context));
+    }
+
+    // Spawn the consumer threads
+    for (int i = 0; i < NThreads; ++i) {
+        threads.emplace_back(ProcessOperation, std::ref(operQueue), std::ref(context));
+    }
+
+    // Wait for the threads to finish
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    uint_fast64_t expectedResult = (Total / 4) * (4 + 5) + (Total / 4) * (9 - 3) +
+                                   (Total / 4) * (6 * 2) + (Total / 4) * (500 / 100);
+    REQUIRE(context.result == expectedResult);
 }

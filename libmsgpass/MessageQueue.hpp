@@ -8,8 +8,10 @@
 namespace libmsgpass {
 
 class MessageQueue {
-   private:
    public:
+    MessageQueue() = default;
+    MessageQueue(const MessageQueue&) = delete;
+
     void Send(int what, int arg1, int arg2, void* obj);
     void ClearMsgType(int what);
     size_t Count() const;

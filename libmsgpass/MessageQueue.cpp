@@ -11,10 +11,10 @@ void MessageQueue::Send(int what, int arg1, int arg2, void* obj) {
 
 void MessageQueue::ClearMsgType(int what) {
     std::unique_lock<std::mutex> lock_guard(mutex_);
-    auto it = std::begin(queue_);
-    while (it != std::end(queue_)) {
+    auto it = queue_.begin();
+    while (it != queue_.end()) {
         if (it->what == what) {
-            queue_.erase(it++);
+            it = queue_.erase(it);
         } else {
             ++it;
         }
@@ -30,6 +30,6 @@ void MessageQueue::Dequeue(Message& message) {
     std::unique_lock<std::mutex> lock_guard(mutex_);
     cond_var_.wait(lock_guard, [this]() { return !queue_.empty(); });
     message = queue_.front();
-    queue_.pop_front();
+    queue_.erase(queue_.begin());
 }
 
